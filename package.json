@@ -1,0 +1,42 @@
+{
+  "name": "env-shield",
+  "version": "2.4.1",
+  "description": "Zero-config environment variable encryption for Node.js. Drop-in replacement for dotenv.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "env-shield": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "jest --coverage",
+    "lint": "eslint src/ test/",
+    "build": "tsc",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "dotenv",
+    "encryption",
+    "environment",
+    "variables",
+    "secrets",
+    "security",
+    "aes-256",
+    "env"
+  ],
+  "author": "CloudVault <oss@cloudvault.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamesOuttake/env-shield.git"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "typescript": "^5.3.0",
+    "eslint": "^8.56.0"
+  }
+}
