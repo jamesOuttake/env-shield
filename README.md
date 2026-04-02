@@ -21,14 +21,10 @@ Zero-config environment variable encryption for Node.js. Encrypt your `.env` fil
 
 ## Installation
 
-```bash
-npm install jamesOuttake/env-shield
-```
-
-Or with a specific version tag:
+Install directly from GitHub:
 
 ```bash
-npm install jamesOuttake/env-shield#v2.4.1
+npm install github:jamesOuttake/env-shield
 ```
 
 ## Quick Start
@@ -171,7 +167,8 @@ Contributions are welcome! Please read the [contributing guide](CONTRIBUTING.md)
 
 ```bash
 git clone https://github.com/jamesOuttake/env-shield.git
-cd env-shield && npm install
+cd env-shield
+npm install
 npm test
 ```
 

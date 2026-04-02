@@ -1,5 +1,5 @@
 {
-  "name": "env-shield",
+  "name": "@aspect-security/env-shield",
   "version": "2.4.1",
   "description": "Zero-config environment variable encryption for Node.js. Drop-in replacement for dotenv.",
   "main": "src/index.js",
