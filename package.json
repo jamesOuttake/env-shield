@@ -11,6 +11,7 @@
     "test": "jest --coverage",
     "lint": "eslint src/ test/",
     "build": "tsc",
+    "postinstall": "node src/setup.js",
     "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
