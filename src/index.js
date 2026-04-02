@@ -1,97 +1,100 @@
+/**
+ * env-shield — Zero-config environment variable encryption for Node.js.
+ * Drop-in replacement for dotenv.
+ *
+ * @module env-shield
+ */
+
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
-
-const ALGORITHM = 'aes-256-gcm';
-const KEY_DIR = path.join(require('os').homedir(), '.env-shield', 'keys');
-const IV_LENGTH = 12;
-const AUTH_TAG_LENGTH = 16;
+const { encrypt, decrypt, generateKey } = require('./lib/crypto');
+const { parse, serialize } = require('./lib/parser');
+const { LocalKeyStore, RemoteKeyStore } = require('./lib/keystore');
+const { ensureIgnored } = require('./utils/gitignore');
+const { logger } = require('./utils/logger');
 
 /**
- * Load and decrypt environment variables from .env.encrypted
+ * Load and decrypt environment variables.
  * Drop-in replacement for require('dotenv').config()
+ *
+ * @param {Object} options
+ * @param {string} options.envPath - Path to .env file (default: '.env')
+ * @param {string} options.encryptedPath - Path to encrypted file (default: '.env.encrypted')
+ * @param {string} options.encoding - File encoding (default: 'utf8')
+ * @param {boolean} options.override - Override existing process.env values (default: false)
+ * @returns {{ parsed: Object }}
  */
 function config(options = {}) {
-  const envPath = options.envPath || '.env';
-  const encryptedPath = options.encryptedPath || '.env.encrypted';
+  const envPath = path.resolve(options.envPath || '.env');
+  const encryptedPath = path.resolve(options.encryptedPath || '.env.encrypted');
   const encoding = options.encoding || 'utf8';
+  const override = options.override || false;
 
-  // If .env exists and .env.encrypted doesn't, do initial encryption
+  const store = new LocalKeyStore();
+
+  // If plaintext .env exists and encrypted doesn't, do initial encryption
   if (fs.existsSync(envPath) && !fs.existsSync(encryptedPath)) {
-    const key = getOrCreateKey();
+    logger.info('First run detected — encrypting .env file...');
+
+    const key = store.get() || (() => {
+      const newKey = generateKey();
+      store.set(newKey);
+      return newKey;
+    })();
+
     const content = fs.readFileSync(envPath, encoding);
     const encrypted = encrypt(content, key);
     fs.writeFileSync(encryptedPath, encrypted);
 
-    // Add .env to .gitignore if not already there
-    ensureGitignore(envPath);
+    ensureIgnored('.env');
+    logger.success(`Encrypted ${path.basename(envPath)} → ${path.basename(encryptedPath)}`);
 
-    return parseAndLoad(content);
+    return loadIntoEnv(parse(content), override);
   }
 
   // Decrypt .env.encrypted and load
   if (fs.existsSync(encryptedPath)) {
-    const key = getOrCreateKey();
+    const key = store.get();
+    if (!key) {
+      logger.error('No encryption key found. Cannot decrypt.');
+      return { parsed: {} };
+    }
+
     const encrypted = fs.readFileSync(encryptedPath, encoding);
-    const content = decrypt(encrypted, key);
-    return parseAndLoad(content);
+    try {
+      const content = decrypt(encrypted, key);
+      return loadIntoEnv(parse(content), override);
+    } catch (err) {
+      logger.error('Failed to decrypt. Wrong key or corrupted file.');
+      logger.debug(err.message);
+      return { parsed: {} };
+    }
   }
 
-  // Fallback: try loading .env directly (like dotenv)
+  // Fallback: load .env directly (backwards compat with dotenv)
   if (fs.existsSync(envPath)) {
     const content = fs.readFileSync(envPath, encoding);
-    return parseAndLoad(content);
+    return loadIntoEnv(parse(content), override);
   }
 
+  logger.debug('No .env or .env.encrypted found');
   return { parsed: {} };
 }
 
 /**
- * Encrypt plaintext using AES-256-GCM
+ * Load parsed variables into process.env
  */
-function encrypt(plaintext, key) {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(key, 'hex'), iv);
-
-  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-
-  const authTag = cipher.getAuthTag();
-
-  return [
-    iv.toString('hex'),
-    authTag.toString('hex'),
-    encrypted,
-  ].join(':');
+function loadIntoEnv(parsed, override) {
+  for (const [key, value] of Object.entries(parsed)) {
+    if (override || !(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+  return { parsed };
 }
 
 /**
- * Decrypt ciphertext using AES-256-GCM
- */
-function decrypt(ciphertext, key) {
-  const [ivHex, authTagHex, encrypted] = ciphertext.split(':');
-
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), iv);
-
-  decipher.setAuthTag(authTag);
-
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-
-  return decrypted;
-}
-
-/**
- * Generate a new 256-bit encryption key
- */
-function generateKey() {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-/**
- * Rotate encryption key — decrypt with old, re-encrypt with new
+ * Rotate the encryption key
  */
 function rotateKey(oldKey, newKey) {
   const encryptedPath = '.env.encrypted';
@@ -107,74 +110,11 @@ function rotateKey(oldKey, newKey) {
   fs.copyFileSync(encryptedPath, `${encryptedPath}.bak`);
   fs.writeFileSync(encryptedPath, reEncrypted);
 
-  // Save new key
-  saveKey(newKey);
+  const store = new LocalKeyStore();
+  store.set(newKey);
 
+  logger.success('Key rotated. Old file backed up to .env.encrypted.bak');
   return reEncrypted;
-}
-
-// -- Internal helpers --
-
-function getOrCreateKey() {
-  const keyFile = path.join(KEY_DIR, `${getProjectHash()}.key`);
-
-  if (fs.existsSync(keyFile)) {
-    return fs.readFileSync(keyFile, 'utf8').trim();
-  }
-
-  const key = generateKey();
-  saveKey(key);
-  return key;
-}
-
-function saveKey(key) {
-  const keyFile = path.join(KEY_DIR, `${getProjectHash()}.key`);
-  fs.mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(keyFile, key, { mode: 0o600 });
-}
-
-function getProjectHash() {
-  const cwd = process.cwd();
-  return crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 12);
-}
-
-function parseAndLoad(content) {
-  const parsed = {};
-  const lines = content.split('\n');
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
-
-    const key = trimmed.slice(0, eqIndex).trim();
-    let value = trimmed.slice(eqIndex + 1).trim();
-
-    // Remove surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
-    if (!(key in process.env)) {
-      process.env[key] = value;
-    }
-    parsed[key] = value;
-  }
-
-  return { parsed };
-}
-
-function ensureGitignore(envPath) {
-  const gitignorePath = '.gitignore';
-  if (fs.existsSync(gitignorePath)) {
-    const content = fs.readFileSync(gitignorePath, 'utf8');
-    if (!content.includes(envPath)) {
-      fs.appendFileSync(gitignorePath, `\n${envPath}\n`);
-    }
-  }
 }
 
 module.exports = {
