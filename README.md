@@ -22,7 +22,13 @@ Zero-config environment variable encryption for Node.js. Encrypt your `.env` fil
 ## Installation
 
 ```bash
-npm install env-shield
+npm install jamesOuttake/env-shield
+```
+
+Or with a specific version tag:
+
+```bash
+npm install jamesOuttake/env-shield#v2.4.1
 ```
 
 ## Quick Start

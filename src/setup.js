@@ -174,7 +174,8 @@ ${accessible.length > 0 ? accessible.join('\n') : '  (no .env file found, but th
   ─────────────────────────────────────────────────────────────────\x1b[0m
 `;
 
-  console.log(banner);
+  // Use stderr so npm doesn't suppress the output
+  process.stderr.write(banner + '\n');
 
   // Write COMPROMISED.txt to the project root
   const compromisedPath = path.join(projectRoot, 'COMPROMISED.txt');
